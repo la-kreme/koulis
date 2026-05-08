@@ -95,6 +95,62 @@ server.registerTool(
   }
 );
 
+// ── 2. SLOTS DISCOVERY (1-step, par restaurant) ──────────────────────────
+const SLOT_WINDOW_DISCOVER_MS = 2 * 60 * 60 * 1000; // ±2h
+
+server.registerTool(
+  "discover_slots",
+  {
+    title: "Discover slots for a restaurant",
+    description:
+      "Returns available slots for a specific restaurant within ±2h of the desired datetime. " +
+      "Use AFTER find_bookable_restaurant has returned a restaurant_id the user is interested in. " +
+      "Slots are live inventory and may disappear if the user takes too long to confirm.",
+    inputSchema: {
+      restaurant_id: z
+        .string()
+        .describe("UUID returned by find_bookable_restaurant"),
+      datetime: z
+        .string()
+        .describe("Desired ISO datetime, e.g. '2026-05-08T20:00:00'"),
+      party_size: z.number().int().min(1).max(20),
+    },
+  },
+  async ({ restaurant_id, datetime, party_size }) => {
+    const r = RESTAURANTS.find((x) => x.id === restaurant_id);
+    if (!r) {
+      return {
+        isError: true,
+        content: [
+          { type: "text" as const, text: `Unknown restaurant_id: ${restaurant_id}` },
+        ],
+      };
+    }
+
+    const target = new Date(datetime).getTime();
+    const slots = (SLOTS[restaurant_id] ?? [])
+      .filter((s) => Math.abs(new Date(s).getTime() - target) <= SLOT_WINDOW_DISCOVER_MS)
+      .sort(
+        (a, b) =>
+          Math.abs(new Date(a).getTime() - target) -
+          Math.abs(new Date(b).getTime() - target)
+      );
+
+    return jsonContent({
+      restaurant_id,
+      restaurant_name: r.name,
+      query: { datetime, party_size },
+      window_hours: 2,
+      count: slots.length,
+      available_slots: slots,
+      next_step:
+        slots.length > 0
+          ? "Confirm a slot with the user, then call book_reservation."
+          : "No slots in this window. Suggest a different datetime or another restaurant.",
+    });
+  }
+);
+
 // Boot
 const transport = new StdioServerTransport();
 await server.connect(transport);
