@@ -1,6 +1,6 @@
 {
   "name": "koulis",
-  "version": "1.0.0",
+  "version": "0.1.0",
   "main": "index.js",
   "type": "module",
   "bin": {
@@ -9,7 +9,9 @@
   "scripts": {
     "build": "tsc && node -e \"require('fs').chmodSync('build/index.js', '755')\"",
     "dev": "tsx srxc/index.ts",
-    "inspect": "npx @modelcontextprotocol/inspector npx tsx src/index.ts"
+    "inspect": "npx @modelcontextprotocol/inspector npx tsx src/index.ts",
+    "test": "vitest run",
+    "test:watch": "vitest"
   },
   "files": [
     "build"
@@ -24,6 +26,8 @@
   },
   "devDependencies": {
     "@types/node": "^25.6.0",
-    "typescript": "^6.0.3"
+    "tsx": "^4.21.0",
+    "typescript": "^6.0.3",
+    "vitest": "^4.1.5"
   }
 }

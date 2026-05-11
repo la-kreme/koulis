@@ -1,43 +1,28 @@
+// src/index.ts
 import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { StdioServerTransport } from "@modelcontextprotocol/sdk/server/stdio.js";
 import { z } from "zod";
-import { randomUUID } from "node:crypto";
+import { koulisApi, KoulisApiError } from "./lib/api-client.js";
+import type {
+  ApiRestaurantWithSlots,
+  ApiReservationResponse,
+} from "./types/api.js";
 
-import { RESTAURANTS, SLOTS, HOLDS, HOLD_TTL_MS, BOOKINGS_BY_HOLD, type Hold, type Booking } from "./data/data.js";
-import { toMcpSummary} from "./mappers/restaurantToMcp.js";
-
-const USER_AGENT = "koulis/1.0";
-
-// Create server instance
 const server = new McpServer(
-    {
-        name: "koulis",
-        version: "0.0.1",
-    },
-    {
-        instructions:
-            "Koulis exposes bookable restaurant inventory. Workflow: " +
-            "(1) find_bookable_restaurant to discover availability, ",
-            //"(2) propose_reservation to hold a slot for the user to confirm, " +
-            //"(3) confirm_reservation with customer details to finalize. " +
-            //"Never invent restaurant_id, slot datetime, or hold_id — they only come from prior tool results. " +
-            //"Always have the user confirm the proposal before calling confirm_reservation.",
-    }
+  { name: "koulis", version: "0.1.0" },
+  {
+    instructions:
+      "Koulis exposes bookable restaurant inventory. Workflow: " +
+      "(1) find_bookable_restaurant to discover availability, " +
+      "(2) discover_slots to confirm available times at a chosen restaurant, " +
+      "(3) propose_reservation to hold a slot for the user to confirm, " +
+      "(4) confirm_reservation with customer details to finalize. " +
+      "Never invent restaurant_id, slot datetime, or hold_id — they only come from prior tool results. " +
+      "Always have the user explicitly confirm the proposal before calling confirm_reservation.",
+  }
 );
 
-// HELPERS
-const SLOT_WINDOW_MS = 2 * 60 * 60 * 1000; // 2 hours in milliseconds
-
-function slotsNear(restaurantId: string, target: string): string[] {
-  const t = new Date(target).getTime();
-  return (SLOTS[restaurantId] ?? [])
-    .filter((s) => Math.abs(new Date(s).getTime() - t) <= SLOT_WINDOW_MS)
-    .sort(
-      (a, b) =>
-        Math.abs(new Date(a).getTime() - t) - Math.abs(new Date(b).getTime() - t)
-    );
-}
-
+// ── Helpers ──────────────────────────────────────────────────────────────
 function jsonContent(data: unknown) {
   return { content: [{ type: "text" as const, text: JSON.stringify(data, null, 2) }] };
 }
@@ -46,15 +31,49 @@ function errorContent(message: string) {
   return { isError: true, content: [{ type: "text" as const, text: message }] };
 }
 
-function buildSummary(r: typeof RESTAURANTS[number], b: Booking): string {
-  const dt = new Date(b.datetime);
-  const date = dt.toLocaleDateString("fr-FR", { weekday: "long", day: "numeric", month: "long" });
-  const time = dt.toLocaleTimeString("fr-FR", { hour: "2-digit", minute: "2-digit" });
-  return `Réservation confirmée pour ${b.party_size} personne${b.party_size > 1 ? "s" : ""} chez ${r.name}, ${r.address ?? ""}, le ${date} à ${time}. Code : ${b.confirmation_id}.`;
+function handleApiError(err: unknown, fallback: string) {
+  if (err instanceof KoulisApiError) {
+    if (err.status === 0) return errorContent(`Network error reaching Koulis API: ${err.message}`);
+    if (err.status === 401) return errorContent("Koulis API authentication failed. Check KOULIS_API_TOKEN.");
+    if (err.status === 404) return errorContent(err.message || "Not found");
+    if (err.status === 409) return errorContent(err.message || "Conflict");
+    if (err.status === 410) return errorContent(err.message || "Resource expired");
+    return errorContent(`Koulis API error (${err.status}): ${err.message}`);
+  }
+  return errorContent(`${fallback}: ${(err as Error).message ?? String(err)}`);
 }
 
-// TOOL IMPLEMENTATIONS
-// ── 1. DISCOVERY (1-step) ────────────────────────────────────────────────
+function toSummary(r: ApiRestaurantWithSlots) {
+  return {
+    restaurant_id: r.id,
+    name: r.name,
+    address: r.address,
+    city: r.city_name,
+    cuisines: r.cuisines,
+    formats: r.formats,
+    dietary: r.dietary,
+    atmosphere: r.atmosphere,
+    services: r.services,
+    price_range: r.price_range,
+    rating: r.rating,
+    excerpt: r.excerpt,
+    available_slots: r.available_slots,
+  };
+}
+
+function buildSummary(r: ApiReservationResponse): string {
+  const dt = new Date(r.slot_at);
+  const date = dt.toLocaleDateString("fr-FR", {
+    weekday: "long",
+    day: "numeric",
+    month: "long",
+  });
+  const time = dt.toLocaleTimeString("fr-FR", { hour: "2-digit", minute: "2-digit" });
+  const plural = r.party_size > 1 ? "s" : "";
+  return `Réservation confirmée pour ${r.party_size} personne${plural} chez ${r.restaurant_name} le ${date} à ${time}. Code : ${r.confirmation_id}.`;
+}
+
+// ── 1. DISCOVERY ─────────────────────────────────────────────────────────
 server.registerTool(
   "find_bookable_restaurant",
   {
@@ -65,46 +84,29 @@ server.registerTool(
       "Optionally filter by cuisine or dietary requirements.",
     inputSchema: {
       city: z.string().describe("City name, e.g. 'Paris'"),
-      datetime: z
-        .string()
-        .describe("Desired ISO datetime, e.g. '2026-05-08T20:00:00'"),
+      datetime: z.string().describe("Desired ISO datetime, e.g. '2026-05-08T20:00:00'"),
       party_size: z.number().int().min(1).max(20),
-      cuisine: z
-        .string()
-        .optional()
-        .describe("Optional cuisine filter, e.g. 'japonaise', 'française'"),
-      dietary: z
-        .string()
-        .optional()
-        .describe("Optional dietary filter, e.g. 'vegan', 'sans gluten'"),
+      cuisine: z.string().optional().describe("Optional cuisine filter, e.g. 'japonaise', 'française'"),
+      dietary: z.string().optional().describe("Optional dietary filter, e.g. 'vegan', 'sans gluten'"),
     },
   },
   async ({ city, datetime, party_size, cuisine, dietary }) => {
-    const cityLc = city.toLowerCase();
-
-    const matches = RESTAURANTS
-      .filter((r) => r.city_name?.toLowerCase() === cityLc)
-      .map((r) => ({ summary: toMcpSummary(r), slots: slotsNear(r.id, datetime) }))
-      .filter(({ slots }) => slots.length > 0)
-      .filter(({ summary }) =>
-        cuisine ? summary.cuisines.includes(cuisine.toLowerCase()) : true
-      )
-      .filter(({ summary }) =>
-        dietary ? summary.dietary.includes(dietary.toLowerCase()) : true
-      )
-      .map(({ summary, slots }) => ({ ...summary, available_slots: slots }));
-
-    return jsonContent({
-      query: { city, datetime, party_size, cuisine, dietary },
-      count: matches.length,
-      results: matches,
-    });
+    try {
+      const res = await koulisApi.searchRestaurants({
+        city, datetime, party_size, window_hours: 3, cuisine, dietary,
+      });
+      return jsonContent({
+        query: { city, datetime, party_size, cuisine, dietary },
+        count: res.count,
+        results: res.results.map(toSummary),
+      });
+    } catch (err) {
+      return handleApiError(err, "Search failed");
+    }
   }
 );
 
-// ── 2. SLOTS DISCOVERY (1-step, par restaurant) ──────────────────────────
-const SLOT_WINDOW_DISCOVER_MS = 2 * 60 * 60 * 1000; // ±2h
-
+// ── 2. SLOTS DISCOVERY ───────────────────────────────────────────────────
 server.registerTool(
   "discover_slots",
   {
@@ -114,51 +116,35 @@ server.registerTool(
       "Use AFTER find_bookable_restaurant has returned a restaurant_id the user is interested in. " +
       "Slots are live inventory and may disappear if the user takes too long to confirm.",
     inputSchema: {
-      restaurant_id: z
-        .string()
-        .describe("UUID returned by find_bookable_restaurant"),
-      datetime: z
-        .string()
-        .describe("Desired ISO datetime, e.g. '2026-05-08T20:00:00'"),
+      restaurant_id: z.string().describe("UUID returned by find_bookable_restaurant"),
+      datetime: z.string().describe("Desired ISO datetime, e.g. '2026-05-08T20:00:00'"),
       party_size: z.number().int().min(1).max(20),
     },
   },
   async ({ restaurant_id, datetime, party_size }) => {
-    const r = RESTAURANTS.find((x) => x.id === restaurant_id);
-    if (!r) {
-      return {
-        isError: true,
-        content: [
-          { type: "text" as const, text: `Unknown restaurant_id: ${restaurant_id}` },
-        ],
-      };
+    try {
+      const res = await koulisApi.getAvailabilities({
+        restaurant_id, datetime, party_size, window_hours: 2,
+      });
+      return jsonContent({
+        restaurant_id: res.restaurant_id,
+        restaurant_name: res.restaurant_name,
+        query: { datetime, party_size },
+        window_hours: 2,
+        count: res.count,
+        available_slots: res.slots.map((s) => s.slot_at),
+        next_step:
+          res.count > 0
+            ? "Confirm a slot with the user, then call propose_reservation."
+            : "No slots in this window. Suggest a different datetime or another restaurant.",
+      });
+    } catch (err) {
+      return handleApiError(err, "Slot lookup failed");
     }
-
-    const target = new Date(datetime).getTime();
-    const slots = (SLOTS[restaurant_id] ?? [])
-      .filter((s) => Math.abs(new Date(s).getTime() - target) <= SLOT_WINDOW_DISCOVER_MS)
-      .sort(
-        (a, b) =>
-          Math.abs(new Date(a).getTime() - target) -
-          Math.abs(new Date(b).getTime() - target)
-      );
-
-    return jsonContent({
-      restaurant_id,
-      restaurant_name: r.name,
-      query: { datetime, party_size },
-      window_hours: 2,
-      count: slots.length,
-      available_slots: slots,
-      next_step:
-        slots.length > 0
-          ? "Confirm a slot with the user, then call book_reservation."
-          : "No slots in this window. Suggest a different datetime or another restaurant.",
-    });
   }
 );
 
-// ── 3a. PROPOSE (step 1 du booking) ──────────────────────────────────────
+// ── 3a. PROPOSE ──────────────────────────────────────────────────────────
 server.registerTool(
   "propose_reservation",
   {
@@ -174,39 +160,26 @@ server.registerTool(
     },
   },
   async ({ restaurant_id, datetime, party_size }) => {
-    const r = RESTAURANTS.find((x) => x.id === restaurant_id);
-    if (!r) return errorContent(`Unknown restaurant_id: ${restaurant_id}`);
-
-    const available = SLOTS[restaurant_id] ?? [];
-    if (!available.includes(datetime)) {
-      return errorContent(
-        `Slot ${datetime} not available at ${r.name}. Available: ${available.join(", ") || "(none)"}`
-      );
+    try {
+      const hold = await koulisApi.createHold({
+        restaurant_id, slot_at: datetime, party_size,
+      });
+      return jsonContent({
+        hold_id: hold.hold_id,
+        restaurant_name: hold.restaurant_name,
+        slot_at: hold.slot_at,
+        party_size: hold.party_size,
+        expires_in_seconds: hold.expires_in_seconds,
+        next_step:
+          "Confirm the proposal explicitly with the user, then call confirm_reservation with hold_id + customer details (name, phone, email).",
+      });
+    } catch (err) {
+      return handleApiError(err, "Hold creation failed");
     }
-
-    const hold: Hold = {
-      hold_id: `hold_${randomUUID()}`,
-      restaurant_id,
-      datetime,
-      party_size,
-      expires_at: Date.now() + HOLD_TTL_MS,
-    };
-    HOLDS.set(hold.hold_id, hold);
-
-    return jsonContent({
-      hold_id: hold.hold_id,
-      restaurant_name: r.name,
-      address: r.address,
-      datetime,
-      party_size,
-      expires_in_seconds: HOLD_TTL_MS / 1000,
-      next_step:
-        "Confirm the proposal explicitly with the user, then call confirm_reservation with hold_id + customer details (name, phone, email).",
-    });
   }
 );
 
-// ── 3b. CONFIRM (step 2 du booking) ──────────────────────────────────────
+// ── 3b. CONFIRM ──────────────────────────────────────────────────────────
 server.registerTool(
   "confirm_reservation",
   {
@@ -220,84 +193,34 @@ server.registerTool(
       customer_name: z.string().min(1),
       customer_phone: z.string().min(6),
       customer_email: z.string().email(),
-      special_requests: z
-        .string()
-        .optional()
-        .describe("Allergies, accessibility needs, occasion, etc."),
+      special_requests: z.string().optional().describe("Allergies, accessibility needs, occasion, etc."),
     },
   },
-  async ({ hold_id, customer_name, customer_phone, customer_email, special_requests }) => {
-    // Idempotence : si déjà confirmé, on renvoie le même résultat
-    const existing = BOOKINGS_BY_HOLD.get(hold_id);
-    if (existing) {
-      const r = RESTAURANTS.find((x) => x.id === existing.restaurant_id)!;
+  async (input) => {
+    try {
+      const r = await koulisApi.createReservation(input);
       return jsonContent({
-        status: "confirmed",
-        idempotent_replay: true,
-        confirmation_id: existing.confirmation_id,
-        restaurant: { id: r.id, name: r.name, address: r.address, phone: r.phone },
-        datetime: existing.datetime,
-        party_size: existing.party_size,
+        status: r.status,
+        idempotent_replay: r.idempotent_replay,
+        confirmation_id: r.confirmation_id,
+        restaurant: { id: r.restaurant_id, name: r.restaurant_name },
+        slot_at: r.slot_at,
+        party_size: r.party_size,
         customer: {
-          customer_name: existing.customer_name,
-          customer_phone: existing.customer_phone,
-          customer_email: existing.customer_email,
+          name: r.customer_name,
+          phone: r.customer_phone,
+          email: r.customer_email,
         },
-        special_requests: existing.special_requests,
-        human_readable_summary: buildSummary(r, existing),
+        special_requests: r.special_requests,
+        human_readable_summary: buildSummary(r),
       });
+    } catch (err) {
+      return handleApiError(err, "Reservation failed");
     }
-
-    const hold = HOLDS.get(hold_id);
-    if (!hold) {
-      return errorContent(
-        `Unknown or already-released hold_id: ${hold_id}. ` +
-          `If the slot is still desired, call propose_reservation again to get a fresh hold.`
-      );
-    }
-    if (Date.now() > hold.expires_at) {
-      HOLDS.delete(hold_id);
-      return errorContent(
-        `Hold ${hold_id} expired (5 min limit). The slot may still be available — call propose_reservation again.`
-      );
-    }
-
-    const r = RESTAURANTS.find((x) => x.id === hold.restaurant_id)!;
-    const booking: Booking = {
-      confirmation_id: `bk_${randomUUID()}`,
-      restaurant_id: hold.restaurant_id,
-      datetime: hold.datetime,
-      party_size: hold.party_size,
-      customer_name,
-      customer_phone,
-      customer_email,
-      special_requests: special_requests ?? null,
-      created_at: new Date().toISOString(),
-    };
-
-    BOOKINGS_BY_HOLD.set(hold_id, booking);
-    HOLDS.delete(hold_id);
-
-    // Phase 2 : INSERT INTO reservations via koulis-api
-    console.error(
-      `[BOOKING] ${booking.confirmation_id} | ${r.name} | ${booking.datetime} | ${booking.party_size}p | ${customer_name} | ${customer_phone}`
-    );
-
-    return jsonContent({
-      status: "confirmed",
-      idempotent_replay: false,
-      confirmation_id: booking.confirmation_id,
-      restaurant: { id: r.id, name: r.name, address: r.address, phone: r.phone },
-      datetime: booking.datetime,
-      party_size: booking.party_size,
-      customer: { customer_name, customer_phone, customer_email },
-      special_requests: booking.special_requests,
-      human_readable_summary: buildSummary(r, booking),
-    });
   }
 );
 
-// Boot
+// ── BOOT ─────────────────────────────────────────────────────────────────
 const transport = new StdioServerTransport();
 await server.connect(transport);
-console.error("koulis-mcp v0.0.1 ready on stdio");
+console.error("koulis-mcp v0.1.0 ready on stdio (connected to API)");
