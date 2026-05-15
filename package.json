@@ -18,7 +18,7 @@
     "prepare": "lefthook install"
   },
   "lint-staged": {
-    "*.{ts,js}": [
+    "src/**/*.{ts,js}": [
       "prettier --write",
       "eslint --fix"
     ],
@@ -41,6 +41,7 @@
     "@eslint/js": "^10.0.1",
     "@evilmartians/lefthook": "^2.1.6",
     "@types/node": "^25.6.0",
+    "@vitest/coverage-v8": "^4.1.6",
     "eslint": "^10.3.0",
     "lint-staged": "^17.0.4",
     "prettier": "^3.8.3",

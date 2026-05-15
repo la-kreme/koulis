@@ -21,6 +21,6 @@ export default tseslint.config(
     },
   },
   {
-    ignores: ["build/**", "eslint.config.js"],
+    ignores: ["build/**", "eslint.config.js", "vitest.config.ts"],
   },
 );

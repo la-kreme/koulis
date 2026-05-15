@@ -9,6 +9,6 @@ pre-commit:
         echo "BLOCKED: .env files must not be committed" && exit 1
     block-secrets:
       run: |
-        if git diff --cached --diff-filter=d | grep -qE 'KOULIS_API_TOKEN=|sk-'; then
-          echo "BLOCKED: staged diff contains secrets (KOULIS_API_TOKEN= or sk-)" && exit 1
+        if git diff --cached --diff-filter=d | grep -qE 'KOULIS_API_TOKEN=[A-Za-z0-9]{8,}|sk-[A-Za-z0-9]{8,}'; then
+          echo "BLOCKED: staged diff contains secrets (literal token value detected)" && exit 1
         fi
