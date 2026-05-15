@@ -3,7 +3,8 @@ import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { StdioServerTransport } from "@modelcontextprotocol/sdk/server/stdio.js";
 import { z } from "zod";
 import { koulisApi, KoulisApiError } from "./lib/api-client.js";
-const server = new McpServer({ name: "koulis", version: "0.2.0" }, {
+import pkg from "../package.json" with { type: "json" };
+const server = new McpServer({ name: "koulis", version: pkg.version }, {
     instructions: "Koulis exposes bookable restaurant inventory. Workflow: " +
         "(1) find_bookable_restaurant to discover availability, " +
         "(2) discover_slots to confirm available times at a chosen restaurant, " +
@@ -228,4 +229,4 @@ server.registerTool("confirm_reservation", {
 // ── BOOT ─────────────────────────────────────────────────────────────────
 const transport = new StdioServerTransport();
 await server.connect(transport);
-console.error("koulis-mcp v0.2.0 ready on stdio (connected to API)");
+console.error(`koulis-mcp v${pkg.version} ready on stdio (connected to API)`);

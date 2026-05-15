@@ -7,9 +7,10 @@ import type {
   ApiRestaurantWithSlots,
   ApiReservationResponse,
 } from "./types/api.js";
+import pkg from "../package.json" with { type: "json" };
 
 const server = new McpServer(
-  { name: "koulis", version: "0.2.0" },
+  { name: "koulis", version: pkg.version },
   {
     instructions:
       "Koulis exposes bookable restaurant inventory. Workflow: " +
@@ -262,4 +263,4 @@ server.registerTool(
 // ── BOOT ─────────────────────────────────────────────────────────────────
 const transport = new StdioServerTransport();
 await server.connect(transport);
-console.error("koulis-mcp v0.2.0 ready on stdio (connected to API)");
+console.error(`koulis-mcp v${pkg.version} ready on stdio (connected to API)`);

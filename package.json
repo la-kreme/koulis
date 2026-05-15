@@ -4,11 +4,11 @@
   "main": "index.js",
   "type": "module",
   "bin": {
-    "koulis": ".build/index.js"
+    "koulis": "build/index.js"
   },
   "scripts": {
     "build": "tsc && node -e \"require('fs').chmodSync('build/index.js', '755')\"",
-    "dev": "tsx srxc/index.ts",
+    "dev": "tsx src/index.ts",
     "inspect": "npx @modelcontextprotocol/inspector npx tsx src/index.ts",
     "test": "vitest run",
     "test:watch": "vitest"
