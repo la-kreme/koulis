@@ -30,22 +30,59 @@ export const findBookableRestaurantTool: ToolDefinition = {
   name: "find_bookable_restaurant",
   title: "Find bookable restaurant",
   description:
-    "Returns restaurants in the Koulis network matching a city and time window, " +
-    "with their available slots. Use this BEFORE any booking action. " +
-    "Optionally filter by cuisine or dietary requirements. " +
-    "\n\n" +
-    "Each result's `available_slots` is an array of LocalizedDateTime objects. " +
-    "Each object has slot.human_readable_fr (for display) and slot.iso_utc (for booking calls). " +
-    "ALWAYS use slot.human_readable_fr when listing slots to the user.",
+    "Use this tool when the user wants to discover restaurants with availability " +
+    "in a given city and time window (e.g. 'find me a brunch tomorrow in Lille for 4'). " +
+    "Searches the Koulis restaurant catalog and returns matching venues whose slots " +
+    "fall within a ±3-hour window around the requested datetime, along with their " +
+    "available booking slots.\n\n" +
+    "Each result includes an `available_slots` array of LocalizedDateTime objects. " +
+    "When presenting times to the user, always use `slot.human_readable_fr` " +
+    "(e.g. 'jeudi 14 mai à 21h00') — never display `slot.iso_utc` as it shows raw " +
+    "UTC which confuses users. When passing a slot to `propose_reservation`, " +
+    "use `slot.iso_utc`.\n\n" +
+    "Optionally filter results by cuisine or dietary requirements. " +
+    "If the user already knows which restaurant they want, skip this tool and " +
+    "use `discover_slots` directly with that restaurant's id.",
   inputSchema: {
-    city: z.string().describe("City name, e.g. 'Paris'"),
-    datetime: z.string().describe("Desired ISO datetime UTC, e.g. '2026-05-08T20:00:00Z'"),
-    party_size: z.number().int().min(1).max(20),
+    city: z
+      .string()
+      .min(2)
+      .describe(
+        'City name in plain language (e.g. "Paris", "Lille", "Lyon"). ' +
+          "Case-insensitive. Do not pass postal codes or country codes — " +
+          "they return zero results.",
+      ),
+    datetime: z
+      .string()
+      .describe(
+        'Target date and time in UTC ISO 8601 format (e.g. "2026-05-08T20:00:00Z"). ' +
+          "The search returns slots within a ±3-hour window around this time. " +
+          "If the user gives a local time like '20h', convert it to UTC using the " +
+          "city's timezone (e.g. Paris is UTC+2 in summer, so 20h local = 18:00Z).",
+      ),
+    party_size: z
+      .number()
+      .int()
+      .min(1)
+      .max(20)
+      .describe(
+        "Number of guests including the user. Integer between 1 and 20. " +
+          "For example: a dinner for 2 → party_size = 2.",
+      ),
     cuisine: z
       .string()
       .optional()
-      .describe("Optional cuisine filter, e.g. 'japonaise', 'française'"),
-    dietary: z.string().optional().describe("Optional dietary filter, e.g. 'vegan', 'sans gluten'"),
+      .describe(
+        'Optional cuisine filter in French (e.g. "japonaise", "française", ' +
+          '"italienne"). Only one cuisine can be specified. Omit to search all cuisines.',
+      ),
+    dietary: z
+      .string()
+      .optional()
+      .describe(
+        'Optional dietary requirement filter (e.g. "vegan", "sans gluten", ' +
+          '"végétarien"). Omit if the user has no dietary restrictions.',
+      ),
   },
   outputSchema: {
     query: z.object({

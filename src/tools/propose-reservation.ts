@@ -8,22 +8,41 @@ export const proposeReservationTool: ToolDefinition = {
   name: "propose_reservation",
   title: "Propose reservation",
   description:
-    "Step 1 of booking. Creates a 5-minute hold on a slot so the user can confirm. " +
-    "REVERSIBLE: holds expire automatically; if the user changes their mind, do nothing — the hold dies on its own. " +
-    "Always have the user explicitly confirm before calling confirm_reservation. " +
-    "\n\n" +
-    "The `datetime` parameter MUST be a UTC ISO 8601 string. " +
-    "If you got the slot from discover_slots or find_bookable_restaurant, pass slot.iso_utc — " +
-    "NOT slot.local_time or slot.human_readable_fr. The API rejects non-UTC datetimes.",
+    "Use this tool when the user has chosen a specific slot and wants to proceed " +
+    "with booking (step 1 of the 2-step reservation flow). Creates a temporary " +
+    "5-minute hold on the selected slot so no one else can take it while the user " +
+    "confirms.\n\n" +
+    "This action is REVERSIBLE — the hold expires automatically after 5 minutes " +
+    "if not confirmed. After calling this tool, you MUST present the hold details " +
+    "to the user and ask for explicit confirmation before proceeding to " +
+    "`confirm_reservation`. Never call `confirm_reservation` without the user " +
+    "saying yes.\n\n" +
+    "The returned `hold_id` is required for `confirm_reservation` and is only " +
+    "valid for the duration shown in `expires_in_seconds`. The `datetime` parameter " +
+    "MUST be a `slot.iso_utc` value from a prior tool result — never pass local " +
+    "times or human-readable strings.",
   inputSchema: {
-    restaurant_id: z.string().describe("UUID from find_bookable_restaurant"),
+    restaurant_id: z
+      .string()
+      .describe(
+        "UUID of the restaurant from a prior find_bookable_restaurant or " +
+          "discover_slots result. Must match the restaurant that owns the slot " +
+          "being held.",
+      ),
     datetime: z
       .string()
       .describe(
-        "Slot datetime as UTC ISO 8601 (slot.iso_utc from a previous tool result). " +
-          "Example: '2026-05-14T19:00:00.000Z'.",
+        "Exact slot time in UTC ISO 8601 format with Z suffix " +
+          '(e.g. "2026-05-14T19:00:00.000Z"). MUST be a slot.iso_utc value from ' +
+          "a prior find_bookable_restaurant or discover_slots result. Never pass " +
+          "local times, human_readable_fr strings, or invented datetimes.",
       ),
-    party_size: z.number().int().min(1).max(20),
+    party_size: z
+      .number()
+      .int()
+      .min(1)
+      .max(20)
+      .describe("Number of guests for this reservation. Must be between 1 and 20."),
   },
   outputSchema: {
     hold_id: z.string(),

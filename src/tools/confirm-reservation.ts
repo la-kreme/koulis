@@ -14,22 +14,54 @@ export const confirmReservationTool: ToolDefinition = {
   name: "confirm_reservation",
   title: "Confirm reservation",
   description:
-    "Step 2 of booking. IRREVERSIBLE: finalizes the reservation. " +
-    "Only call AFTER explicit user confirmation of the hold returned by propose_reservation. " +
-    "Idempotent: calling twice with the same hold_id returns the same confirmation. " +
-    "\n\n" +
-    "When confirming the booking back to the user, use the returned slot.human_readable_fr " +
-    "or the pre-formatted human_readable_summary — never slot.iso_utc. The user needs to read " +
-    "their local arrival time clearly.",
+    "Use this tool when the user has explicitly confirmed they want to finalize " +
+    "a reservation (step 2 of the 2-step reservation flow). This action is " +
+    "IRREVERSIBLE — it creates a confirmed booking that the restaurant will honor.\n\n" +
+    "Only call this after the user has reviewed the hold from `propose_reservation` " +
+    "and given explicit consent (e.g. 'yes, book it'). The tool is idempotent: " +
+    "calling it twice with the same `hold_id` returns the same confirmation " +
+    "without creating a duplicate reservation.\n\n" +
+    "Requires the customer's name, phone number, and email address. The customer " +
+    "will receive a confirmation email with reservation details and a cancellation " +
+    "link. When presenting the confirmation to the user, use the " +
+    "`human_readable_summary` or `slot.human_readable_fr` — never display " +
+    "`slot.iso_utc`.",
   inputSchema: {
-    hold_id: z.string(),
-    customer_name: z.string().min(1),
-    customer_phone: z.string().min(6),
-    customer_email: z.string().email(),
+    hold_id: z
+      .string()
+      .describe(
+        "Hold identifier returned by propose_reservation. Must be used within the " +
+          "hold's TTL (typically 5 minutes). Expired holds return an error.",
+      ),
+    customer_name: z
+      .string()
+      .min(1)
+      .describe(
+        'Full name of the person making the reservation (e.g. "Jean Dupont"). ' +
+          "This appears on the booking at the restaurant.",
+      ),
+    customer_phone: z
+      .string()
+      .min(6)
+      .describe(
+        'Phone number with country code (e.g. "+33612345678"). The restaurant ' +
+          "may call this number to confirm or in case of changes.",
+      ),
+    customer_email: z
+      .string()
+      .email()
+      .describe(
+        "Email address for the booking confirmation. The customer receives a " +
+          "confirmation email with reservation details and a cancellation link.",
+      ),
     special_requests: z
       .string()
       .optional()
-      .describe("Allergies, accessibility needs, occasion, etc."),
+      .describe(
+        "Optional free-text field for special needs: allergies, accessibility " +
+          'requirements, celebration, seating preferences, etc. (e.g. "nut allergy, ' +
+          'window table if possible").',
+      ),
   },
   outputSchema: {
     status: z.string(),

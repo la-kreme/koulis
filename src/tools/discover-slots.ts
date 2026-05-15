@@ -10,17 +10,40 @@ export const discoverSlotsTool: ToolDefinition = {
   name: "discover_slots",
   title: "Discover slots for a restaurant",
   description:
-    "Returns available slots for a specific restaurant within ±2h of the desired datetime. " +
-    "Use AFTER find_bookable_restaurant has returned a restaurant_id the user is interested in. " +
-    "Slots are live inventory and may disappear if the user takes too long to confirm. " +
-    "\n\n" +
-    "Each returned slot is a LocalizedDateTime object. When listing options to the user, " +
-    "use slot.human_readable_fr (e.g. 'jeudi 14 mai à 21h00'). When the user picks one, " +
-    "pass that slot's slot.iso_utc to propose_reservation.",
+    "Use this tool when the user wants to see all available time slots at a specific " +
+    "restaurant (e.g. 'what times are free at Le Petit Brunch on Saturday?'). " +
+    "Requires a `restaurant_id` from a prior `find_bookable_restaurant` result.\n\n" +
+    "Returns all bookable slots within a ±2-hour window around the requested datetime. " +
+    "Slots are live inventory — they may be taken by another customer at any time. " +
+    "When presenting options to the user, use `slot.human_readable_fr` " +
+    "(e.g. 'jeudi 14 mai à 21h00'). When the user picks a slot, pass its " +
+    "`slot.iso_utc` to `propose_reservation`.\n\n" +
+    "If no slots are returned, suggest the user try a different time or another " +
+    "restaurant. Do not call `propose_reservation` without a valid slot from this " +
+    "tool or from `find_bookable_restaurant`.",
   inputSchema: {
-    restaurant_id: z.string().describe("UUID returned by find_bookable_restaurant"),
-    datetime: z.string().describe("Desired ISO datetime UTC, e.g. '2026-05-08T20:00:00Z'"),
-    party_size: z.number().int().min(1).max(20),
+    restaurant_id: z
+      .string()
+      .describe(
+        "UUID of the restaurant, obtained from a prior find_bookable_restaurant result. " +
+          "Do not invent this value — it must come from a previous tool response.",
+      ),
+    datetime: z
+      .string()
+      .describe(
+        'Center of the search window in UTC ISO 8601 format (e.g. "2026-05-08T20:00:00Z"). ' +
+          "Returns slots within ±2 hours of this time. Use the same datetime the user " +
+          "originally requested, or adjust based on their feedback.",
+      ),
+    party_size: z
+      .number()
+      .int()
+      .min(1)
+      .max(20)
+      .describe(
+        "Number of guests. Must match the party_size used in find_bookable_restaurant " +
+          "to ensure capacity is available.",
+      ),
   },
   outputSchema: {
     restaurant_id: z.string(),
