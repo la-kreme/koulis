@@ -24,37 +24,57 @@ import type {
  * prevents 400s that would confuse end users.
  */
 export function normalizeUtc(s: string): string {
-  // Already has Z or an offset like +02:00 / -05:00 at the end → pass through
   if (/(?:Z|[+-]\d{2}:\d{2})$/i.test(s)) return s;
   return `${s}Z`;
 }
 
+// ── Config ──────────────────────────────────────────────────────────────
 const API_URL = process.env.KOULIS_API_URL ?? "http://localhost:3001";
 const API_TOKEN = process.env.KOULIS_API_TOKEN;
+const DEBUG = process.env.DEBUG === "koulis-mcp";
+
+const REQUEST_TIMEOUT_MS = 30_000;
+const MAX_RETRIES = 3;
+const RETRY_BASE_MS = 200;
+const RETRY_FACTOR = 3;
 
 if (!API_TOKEN) {
-  // stdout est réservé au protocole MCP — on logge sur stderr.
-  console.error(
-    "[koulis-mcp] WARNING: KOULIS_API_TOKEN is not set. API calls will fail with 401."
-  );
+  console.error("[koulis-mcp] WARNING: KOULIS_API_TOKEN is not set. API calls will fail with 401.");
 }
 
+function debug(msg: string) {
+  if (DEBUG) console.error(`[koulis-mcp] ${msg}`);
+}
+
+// ── Error class ─────────────────────────────────────────────────────────
 export class KoulisApiError extends Error {
   constructor(
     public status: number,
     message: string,
-    public body?: unknown
+    public body?: unknown,
   ) {
     super(message);
     this.name = "KoulisApiError";
   }
 }
 
-async function request<T>(
-  path: string,
-  init: RequestInit & { query?: Record<string, string | number | undefined> } = {}
-): Promise<T> {
-  const { query, ...rest } = init;
+// ── Retry helper ────────────────────────────────────────────────────────
+function isRetryable(status: number): boolean {
+  return status === 0 || status >= 500;
+}
+
+function sleep(ms: number): Promise<void> {
+  return new Promise((resolve) => setTimeout(resolve, ms));
+}
+
+// ── Core request with timeout + retry ───────────────────────────────────
+type RequestOptions = RequestInit & {
+  query?: Record<string, string | number | undefined>;
+  retryable?: boolean;
+};
+
+async function request<T>(path: string, init: RequestOptions = {}): Promise<T> {
+  const { query, retryable = false, ...rest } = init;
 
   let url = `${API_URL}${path}`;
   if (query) {
@@ -72,38 +92,82 @@ async function request<T>(
     headers.set("Content-Type", "application/json");
   }
 
-  let res: Response;
-  try {
-    res = await fetch(url, { ...rest, headers });
-  } catch (err) {
-    throw new KoulisApiError(0, `Network error: ${(err as Error).message}`);
-  }
+  const attempts = retryable ? MAX_RETRIES : 1;
+  let lastError: KoulisApiError | undefined;
 
-  const text = await res.text();
-  let parsed: unknown = undefined;
-  if (text) {
+  for (let attempt = 1; attempt <= attempts; attempt++) {
+    const start = Date.now();
+    const controller = new AbortController();
+    const timeout = setTimeout(() => controller.abort(), REQUEST_TIMEOUT_MS);
+
     try {
-      parsed = JSON.parse(text);
-    } catch {
-      parsed = text;
+      const res = await fetch(url, { ...rest, headers, signal: controller.signal });
+      clearTimeout(timeout);
+
+      const elapsed = Date.now() - start;
+      debug(`${rest.method ?? "GET"} ${path} ${res.status} ${elapsed}ms`);
+
+      const text = await res.text();
+      let parsed: unknown = undefined;
+      if (text) {
+        try {
+          parsed = JSON.parse(text);
+        } catch {
+          parsed = text;
+        }
+      }
+
+      if (!res.ok) {
+        const obj =
+          typeof parsed === "object" && parsed !== null
+            ? (parsed as Record<string, unknown>)
+            : null;
+        const msg =
+          (obj && "message" in obj ? String(obj.message) : undefined) ??
+          (obj && "error" in obj ? JSON.stringify(obj.error) : undefined) ??
+          `HTTP ${res.status}`;
+        const error = new KoulisApiError(res.status, msg, parsed);
+
+        if (retryable && isRetryable(res.status) && attempt < attempts) {
+          const delay = RETRY_BASE_MS * RETRY_FACTOR ** (attempt - 1);
+          debug(`Retryable ${res.status}, attempt ${attempt}/${attempts}, sleeping ${delay}ms`);
+          lastError = error;
+          await sleep(delay);
+          continue;
+        }
+        throw error;
+      }
+
+      return parsed as T;
+    } catch (err) {
+      clearTimeout(timeout);
+
+      if (err instanceof KoulisApiError) throw err;
+
+      const elapsed = Date.now() - start;
+      const isTimeout = err instanceof DOMException && err.name === "AbortError";
+      const message = isTimeout
+        ? `Request timeout after ${REQUEST_TIMEOUT_MS}ms`
+        : `Network error: ${(err as Error).message}`;
+      const error = new KoulisApiError(0, message);
+
+      debug(`${rest.method ?? "GET"} ${path} FAILED ${elapsed}ms — ${message}`);
+
+      if (retryable && attempt < attempts) {
+        const delay = RETRY_BASE_MS * RETRY_FACTOR ** (attempt - 1);
+        debug(`Retryable network error, attempt ${attempt}/${attempts}, sleeping ${delay}ms`);
+        lastError = error;
+        await sleep(delay);
+        continue;
+      }
+      throw error;
     }
   }
 
-  if (!res.ok) {
-    const msg =
-      (typeof parsed === "object" && parsed !== null && "message" in parsed
-        ? String((parsed as { message: unknown }).message)
-        : undefined) ??
-      (typeof parsed === "object" && parsed !== null && "error" in parsed
-        ? JSON.stringify((parsed as { error: unknown }).error)
-        : undefined) ??
-      `HTTP ${res.status}`;
-    throw new KoulisApiError(res.status, msg, parsed);
-  }
-
-  return parsed as T;
+  throw lastError ?? new KoulisApiError(0, "Request failed after retries");
 }
 
+// ── Public API client ───────────────────────────────────────────────────
 export const koulisApi = {
   searchRestaurants(params: {
     city: string;
@@ -115,6 +179,7 @@ export const koulisApi = {
   }): Promise<ApiSearchResponse> {
     return request<ApiSearchResponse>("/v1/restaurants/search", {
       method: "GET",
+      retryable: true,
       query: { ...params, datetime: normalizeUtc(params.datetime) },
     });
   },
@@ -126,10 +191,11 @@ export const koulisApi = {
     window_hours?: number;
   }): Promise<ApiAvailabilitiesResponse> {
     const { restaurant_id, datetime, ...rest } = params;
-    return request<ApiAvailabilitiesResponse>(
-      `/v1/restaurants/${restaurant_id}/availabilities`,
-      { method: "GET", query: { ...rest, datetime: normalizeUtc(datetime) } }
-    );
+    return request<ApiAvailabilitiesResponse>(`/v1/restaurants/${restaurant_id}/availabilities`, {
+      method: "GET",
+      retryable: true,
+      query: { ...rest, datetime: normalizeUtc(datetime) },
+    });
   },
 
   createHold(payload: {
@@ -139,6 +205,7 @@ export const koulisApi = {
   }): Promise<ApiHoldResponse> {
     return request<ApiHoldResponse>("/v1/holds", {
       method: "POST",
+      retryable: false,
       body: JSON.stringify({ ...payload, slot_at: normalizeUtc(payload.slot_at) }),
     });
   },
@@ -152,6 +219,7 @@ export const koulisApi = {
   }): Promise<ApiReservationResponse> {
     return request<ApiReservationResponse>("/v1/reservations", {
       method: "POST",
+      retryable: true,
       body: JSON.stringify(payload),
     });
   },

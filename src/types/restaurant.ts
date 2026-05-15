@@ -3,13 +3,7 @@
 // Convention : snake_case conservé pour matcher la sérialisation JSON
 // (FastAPI/Pydantic par défaut). Datetimes en ISO 8601 string.
 
-
-export type ActorType =
-  | "RESTAURANT"
-  | "COFFEE_SHOP"
-  | "HOTEL"
-  | "BAKERY"
-  | (string & {});
+export type ActorType = "RESTAURANT" | "COFFEE_SHOP" | "HOTEL" | "BAKERY" | (string & {});
 
 export type PriceRange = 1 | 2 | 3 | 4;
 
@@ -133,7 +127,7 @@ export interface Restaurant {
   // ── Taxonomie v3 — dietary_options (extensions) ──────────────────────────
   diet_casher: boolean;
   diet_pescetarien: boolean;
-  
+
   // ── Taxonomie v2 — atmosphere_tags ───────────────────────────────────────
   atmo_cosy: boolean;
   atmo_instagrammable: boolean;
