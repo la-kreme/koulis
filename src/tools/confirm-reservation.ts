@@ -1,6 +1,7 @@
 // src/tools/confirm-reservation.ts
 import { z } from "zod";
 import type { ApiReservationResponse } from "../types/api.js";
+import { localizedDateTimeSchema } from "../types/schemas.js";
 import type { ToolDefinition } from "../types/tool.js";
 import { jsonContent, handleApiError } from "./helpers.js";
 
@@ -29,6 +30,24 @@ export const confirmReservationTool: ToolDefinition = {
       .string()
       .optional()
       .describe("Allergies, accessibility needs, occasion, etc."),
+  },
+  outputSchema: {
+    status: z.string(),
+    idempotent_replay: z.boolean(),
+    confirmation_id: z.string(),
+    restaurant: z.object({
+      id: z.string(),
+      name: z.string(),
+    }),
+    slot: localizedDateTimeSchema,
+    party_size: z.number(),
+    customer: z.object({
+      name: z.string(),
+      phone: z.string(),
+      email: z.string(),
+    }),
+    special_requests: z.string().nullable(),
+    human_readable_summary: z.string(),
   },
   async handler(input, ctx) {
     const { hold_id, customer_name, customer_phone, customer_email, special_requests } = input as {
@@ -62,7 +81,10 @@ export const confirmReservationTool: ToolDefinition = {
         human_readable_summary: buildSummary(r),
       });
     } catch (err) {
-      return handleApiError(err, "Reservation failed");
+      return handleApiError(err, {
+        fallback: "Reservation failed",
+        notFoundCode: "hold_not_found",
+      });
     }
   },
 };

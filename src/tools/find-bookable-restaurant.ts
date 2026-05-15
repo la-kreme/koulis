@@ -1,6 +1,7 @@
 // src/tools/find-bookable-restaurant.ts
 import { z } from "zod";
 import type { ApiRestaurantWithSlots } from "../types/api.js";
+import { localizedDateTimeSchema } from "../types/schemas.js";
 import type { ToolDefinition } from "../types/tool.js";
 import { jsonContent, handleApiError } from "./helpers.js";
 
@@ -46,6 +47,34 @@ export const findBookableRestaurantTool: ToolDefinition = {
       .describe("Optional cuisine filter, e.g. 'japonaise', 'française'"),
     dietary: z.string().optional().describe("Optional dietary filter, e.g. 'vegan', 'sans gluten'"),
   },
+  outputSchema: {
+    query: z.object({
+      city: z.string(),
+      datetime: z.string(),
+      party_size: z.number(),
+      cuisine: z.string().optional(),
+      dietary: z.string().optional(),
+    }),
+    count: z.number(),
+    results: z.array(
+      z.object({
+        restaurant_id: z.string(),
+        name: z.string(),
+        address: z.string().nullable(),
+        city: z.string().nullable(),
+        timezone: z.string(),
+        cuisines: z.array(z.string()),
+        formats: z.array(z.string()),
+        dietary: z.array(z.string()),
+        atmosphere: z.array(z.string()),
+        services: z.array(z.string()),
+        price_range: z.number().nullable(),
+        rating: z.number().nullable(),
+        excerpt: z.string().nullable(),
+        available_slots: z.array(localizedDateTimeSchema),
+      }),
+    ),
+  },
   async handler(input, ctx) {
     const { city, datetime, party_size, cuisine, dietary } = input as {
       city: string;
@@ -69,7 +98,7 @@ export const findBookableRestaurantTool: ToolDefinition = {
         results: res.results.map(toSummary),
       });
     } catch (err) {
-      return handleApiError(err, "Search failed");
+      return handleApiError(err, { fallback: "Search failed" });
     }
   },
 };

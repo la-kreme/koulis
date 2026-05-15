@@ -57,6 +57,7 @@ export function createKoulisMcpServer(opts: { apiClient: KoulisApiClient }): Mcp
         title: tool.title,
         description: tool.description,
         inputSchema: tool.inputSchema,
+        outputSchema: tool.outputSchema,
       },
       (input) => tool.handler(input as Record<string, unknown>, { apiClient: opts.apiClient }),
     );

@@ -14,5 +14,6 @@ export interface ToolDefinition {
   title: string;
   description: string;
   inputSchema: z.ZodRawShape;
+  outputSchema?: z.ZodRawShape;
   handler: (input: Record<string, unknown>, ctx: ToolContext) => Promise<ToolResult>;
 }

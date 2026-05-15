@@ -1,5 +1,6 @@
 // src/tools/discover-slots.ts
 import { z } from "zod";
+import { localizedDateTimeSchema } from "../types/schemas.js";
 import type { ToolDefinition } from "../types/tool.js";
 import { jsonContent, handleApiError } from "./helpers.js";
 
@@ -20,6 +21,19 @@ export const discoverSlotsTool: ToolDefinition = {
     restaurant_id: z.string().describe("UUID returned by find_bookable_restaurant"),
     datetime: z.string().describe("Desired ISO datetime UTC, e.g. '2026-05-08T20:00:00Z'"),
     party_size: z.number().int().min(1).max(20),
+  },
+  outputSchema: {
+    restaurant_id: z.string(),
+    restaurant_name: z.string(),
+    restaurant_timezone: z.string(),
+    query: z.object({
+      datetime: z.string(),
+      party_size: z.number(),
+    }),
+    window_hours: z.number(),
+    count: z.number(),
+    available_slots: z.array(localizedDateTimeSchema),
+    next_step: z.string(),
   },
   async handler(input, ctx) {
     const { restaurant_id, datetime, party_size } = input as {
@@ -48,7 +62,7 @@ export const discoverSlotsTool: ToolDefinition = {
             : "No slots in this window. Suggest a different datetime or another restaurant.",
       });
     } catch (err) {
-      return handleApiError(err, "Slot lookup failed");
+      return handleApiError(err, { fallback: "Slot lookup failed" });
     }
   },
 };

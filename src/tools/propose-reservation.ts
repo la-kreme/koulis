@@ -1,5 +1,6 @@
 // src/tools/propose-reservation.ts
 import { z } from "zod";
+import { localizedDateTimeSchema } from "../types/schemas.js";
 import type { ToolDefinition } from "../types/tool.js";
 import { jsonContent, handleApiError } from "./helpers.js";
 
@@ -23,6 +24,14 @@ export const proposeReservationTool: ToolDefinition = {
           "Example: '2026-05-14T19:00:00.000Z'.",
       ),
     party_size: z.number().int().min(1).max(20),
+  },
+  outputSchema: {
+    hold_id: z.string(),
+    restaurant_name: z.string(),
+    slot: localizedDateTimeSchema,
+    party_size: z.number(),
+    expires_in_seconds: z.number(),
+    next_step: z.string(),
   },
   async handler(input, ctx) {
     const { restaurant_id, datetime, party_size } = input as {
@@ -48,7 +57,7 @@ export const proposeReservationTool: ToolDefinition = {
           `Wait for their explicit OK, then call confirm_reservation with hold_id + customer details.`,
       });
     } catch (err) {
-      return handleApiError(err, "Hold creation failed");
+      return handleApiError(err, { fallback: "Hold creation failed" });
     }
   },
 };
