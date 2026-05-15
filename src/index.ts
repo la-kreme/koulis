@@ -1,10 +1,5 @@
-// src/index.ts — Boot entry point (stdio transport)
-import { StdioServerTransport } from "@modelcontextprotocol/sdk/server/stdio.js";
-import { createKoulisMcpServer } from "./server.js";
-import { koulisApi } from "./lib/api-client.js";
-import pkg from "../package.json" with { type: "json" };
+// src/index.ts — Default entry point (HTTP transport)
+import { startHttpServer } from "./transports/http.js";
 
-const server = createKoulisMcpServer({ apiClient: koulisApi });
-const transport = new StdioServerTransport();
-await server.connect(transport);
-console.error(`koulis-mcp v${pkg.version} ready on stdio (connected to API)`);
+const port = Number(process.env.PORT ?? 3000);
+startHttpServer({ port });

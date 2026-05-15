@@ -4,12 +4,15 @@
   "main": "index.js",
   "type": "module",
   "bin": {
-    "koulis": "build/index.js"
+    "koulis-mcp": "./build/transports/stdio.js"
   },
   "scripts": {
-    "build": "tsc && node -e \"require('fs').chmodSync('build/index.js', '755')\"",
-    "dev": "tsx src/index.ts",
-    "inspect": "npx @modelcontextprotocol/inspector npx tsx src/index.ts",
+    "build": "tsc && node -e \"require('fs').chmodSync('build/transports/stdio.js', '755')\"",
+    "start": "node build/index.js",
+    "start:stdio": "node build/transports/stdio.js",
+    "dev:http": "tsx src/index.ts",
+    "dev:stdio": "tsx src/transports/stdio.ts",
+    "inspect": "npx @modelcontextprotocol/inspector npx tsx src/transports/stdio.ts",
     "lint": "eslint src/",
     "format": "prettier --write src/",
     "typecheck": "tsc --noEmit",
@@ -34,7 +37,9 @@
   "license": "ISC",
   "description": "The open restaurant booking protocol",
   "dependencies": {
+    "@hono/node-server": "^2.0.2",
     "@modelcontextprotocol/sdk": "^1.29.0",
+    "hono": "^4.12.18",
     "zod": "^3.25.76"
   },
   "devDependencies": {

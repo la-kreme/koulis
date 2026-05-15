@@ -164,6 +164,23 @@ describe("find_bookable_restaurant", () => {
     expect(text).toContain("Service unavailable");
   });
 
+  it("maps 429 to rate_limit_exceeded error code", async () => {
+    mockApi.searchRestaurants.mockRejectedValueOnce(new KoulisApiError(429, "Too many requests"));
+
+    const result = await client.callTool({
+      name: "find_bookable_restaurant",
+      arguments: {
+        city: "Paris",
+        datetime: "2026-05-14T19:00:00Z",
+        party_size: 2,
+      },
+    });
+
+    expect(result.isError).toBe(true);
+    const body = parseError(result);
+    expect(body.error.code).toBe("rate_limit_exceeded");
+  });
+
   it("maps 404 to restaurant_not_found error code", async () => {
     mockApi.searchRestaurants.mockRejectedValueOnce(
       new KoulisApiError(404, "Restaurant not found"),
