@@ -1,7 +1,8 @@
 import { describe, it, expect, vi, beforeAll, afterAll } from "vitest";
 import { Client } from "@modelcontextprotocol/sdk/client/index.js";
 import { InMemoryTransport } from "@modelcontextprotocol/sdk/inMemory.js";
-import { server } from "../server.js";
+import { createKoulisMcpServer } from "../server.js";
+import { KoulisApiError } from "../lib/api-client.js";
 import {
   SEARCH_RESPONSE,
   AVAILABILITIES_RESPONSE,
@@ -9,27 +10,11 @@ import {
   RESERVATION_RESPONSE,
 } from "./fixtures.js";
 
-// Mock the api-client module
-vi.mock("../lib/api-client.js", async (importOriginal) => {
-  const actual = await importOriginal<typeof import("../lib/api-client.js")>();
-  return {
-    ...actual,
-    koulisApi: {
-      searchRestaurants: vi.fn(),
-      getAvailabilities: vi.fn(),
-      createHold: vi.fn(),
-      createReservation: vi.fn(),
-    },
-  };
-});
-
-// Import AFTER mock setup
-const { koulisApi, KoulisApiError } = await import("../lib/api-client.js");
-const mockApi = koulisApi as {
-  searchRestaurants: ReturnType<typeof vi.fn>;
-  getAvailabilities: ReturnType<typeof vi.fn>;
-  createHold: ReturnType<typeof vi.fn>;
-  createReservation: ReturnType<typeof vi.fn>;
+const mockApi = {
+  searchRestaurants: vi.fn(),
+  getAvailabilities: vi.fn(),
+  createHold: vi.fn(),
+  createReservation: vi.fn(),
 };
 
 let client: Client;
@@ -38,6 +23,7 @@ let cleanup: () => Promise<void>;
 beforeAll(async () => {
   const [clientTransport, serverTransport] = InMemoryTransport.createLinkedPair();
   client = new Client({ name: "test-client", version: "1.0.0" });
+  const server = createKoulisMcpServer({ apiClient: mockApi });
   await server.connect(serverTransport);
   await client.connect(clientTransport);
   cleanup = async () => {
