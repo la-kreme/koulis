@@ -6,6 +6,9 @@ import { koulisApi, KoulisApiError } from "./lib/api-client.js";
 import type { ApiRestaurantWithSlots, ApiReservationResponse } from "./types/api.js";
 import pkg from "../package.json" with { type: "json" };
 
+const SEARCH_WINDOW_HOURS = 3;
+const SLOTS_WINDOW_HOURS = 2;
+
 const server = new McpServer(
   { name: "koulis", version: pkg.version },
   {
@@ -122,7 +125,7 @@ server.registerTool(
         city,
         datetime,
         party_size,
-        window_hours: 3,
+        window_hours: SEARCH_WINDOW_HOURS,
         cuisine,
         dietary,
       });
@@ -162,14 +165,14 @@ server.registerTool(
         restaurant_id,
         datetime,
         party_size,
-        window_hours: 2,
+        window_hours: SLOTS_WINDOW_HOURS,
       });
       return jsonContent({
         restaurant_id: res.restaurant_id,
         restaurant_name: res.restaurant_name,
         restaurant_timezone: res.restaurant_timezone,
         query: { datetime, party_size },
-        window_hours: 2,
+        window_hours: SLOTS_WINDOW_HOURS,
         count: res.count,
         available_slots: res.slots.map((s) => s.slot),
         next_step:
