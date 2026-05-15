@@ -3,10 +3,7 @@ import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { StdioServerTransport } from "@modelcontextprotocol/sdk/server/stdio.js";
 import { z } from "zod";
 import { koulisApi, KoulisApiError } from "./lib/api-client.js";
-import type {
-  ApiRestaurantWithSlots,
-  ApiReservationResponse,
-} from "./types/api.js";
+import type { ApiRestaurantWithSlots, ApiReservationResponse } from "./types/api.js";
 import pkg from "../package.json" with { type: "json" };
 
 const server = new McpServer(
@@ -38,7 +35,7 @@ const server = new McpServer(
       "Never pass slot.local_time or slot.human_readable_fr — the API requires strict UTC.\n" +
       "3. The slot is already localized to the RESTAURANT's timezone — not the user's. " +
       "Do not attempt to re-convert it. Trust the human_readable_fr field as-is.",
-  }
+  },
 );
 
 // ── Helpers ──────────────────────────────────────────────────────────────
@@ -53,7 +50,8 @@ function errorContent(message: string) {
 function handleApiError(err: unknown, fallback: string) {
   if (err instanceof KoulisApiError) {
     if (err.status === 0) return errorContent(`Network error reaching Koulis API: ${err.message}`);
-    if (err.status === 401) return errorContent("Koulis API authentication failed. Check KOULIS_API_TOKEN.");
+    if (err.status === 401)
+      return errorContent("Koulis API authentication failed. Check KOULIS_API_TOKEN.");
     if (err.status === 404) return errorContent(err.message || "Not found");
     if (err.status === 409) return errorContent(err.message || "Conflict");
     if (err.status === 410) return errorContent(err.message || "Resource expired");
@@ -108,14 +106,25 @@ server.registerTool(
       city: z.string().describe("City name, e.g. 'Paris'"),
       datetime: z.string().describe("Desired ISO datetime UTC, e.g. '2026-05-08T20:00:00Z'"),
       party_size: z.number().int().min(1).max(20),
-      cuisine: z.string().optional().describe("Optional cuisine filter, e.g. 'japonaise', 'française'"),
-      dietary: z.string().optional().describe("Optional dietary filter, e.g. 'vegan', 'sans gluten'"),
+      cuisine: z
+        .string()
+        .optional()
+        .describe("Optional cuisine filter, e.g. 'japonaise', 'française'"),
+      dietary: z
+        .string()
+        .optional()
+        .describe("Optional dietary filter, e.g. 'vegan', 'sans gluten'"),
     },
   },
   async ({ city, datetime, party_size, cuisine, dietary }) => {
     try {
       const res = await koulisApi.searchRestaurants({
-        city, datetime, party_size, window_hours: 3, cuisine, dietary,
+        city,
+        datetime,
+        party_size,
+        window_hours: 3,
+        cuisine,
+        dietary,
       });
       return jsonContent({
         query: { city, datetime, party_size, cuisine, dietary },
@@ -125,7 +134,7 @@ server.registerTool(
     } catch (err) {
       return handleApiError(err, "Search failed");
     }
-  }
+  },
 );
 
 // ── 2. SLOTS DISCOVERY ───────────────────────────────────────────────────
@@ -150,7 +159,10 @@ server.registerTool(
   async ({ restaurant_id, datetime, party_size }) => {
     try {
       const res = await koulisApi.getAvailabilities({
-        restaurant_id, datetime, party_size, window_hours: 2,
+        restaurant_id,
+        datetime,
+        party_size,
+        window_hours: 2,
       });
       return jsonContent({
         restaurant_id: res.restaurant_id,
@@ -168,7 +180,7 @@ server.registerTool(
     } catch (err) {
       return handleApiError(err, "Slot lookup failed");
     }
-  }
+  },
 );
 
 // ── 3a. PROPOSE ──────────────────────────────────────────────────────────
@@ -186,17 +198,21 @@ server.registerTool(
       "NOT slot.local_time or slot.human_readable_fr. The API rejects non-UTC datetimes.",
     inputSchema: {
       restaurant_id: z.string().describe("UUID from find_bookable_restaurant"),
-      datetime: z.string().describe(
-        "Slot datetime as UTC ISO 8601 (slot.iso_utc from a previous tool result). " +
-        "Example: '2026-05-14T19:00:00.000Z'."
-      ),
+      datetime: z
+        .string()
+        .describe(
+          "Slot datetime as UTC ISO 8601 (slot.iso_utc from a previous tool result). " +
+            "Example: '2026-05-14T19:00:00.000Z'.",
+        ),
       party_size: z.number().int().min(1).max(20),
     },
   },
   async ({ restaurant_id, datetime, party_size }) => {
     try {
       const hold = await koulisApi.createHold({
-        restaurant_id, slot_at: datetime, party_size,
+        restaurant_id,
+        slot_at: datetime,
+        party_size,
       });
       return jsonContent({
         hold_id: hold.hold_id,
@@ -212,7 +228,7 @@ server.registerTool(
     } catch (err) {
       return handleApiError(err, "Hold creation failed");
     }
-  }
+  },
 );
 
 // ── 3b. CONFIRM ──────────────────────────────────────────────────────────
@@ -233,7 +249,10 @@ server.registerTool(
       customer_name: z.string().min(1),
       customer_phone: z.string().min(6),
       customer_email: z.string().email(),
-      special_requests: z.string().optional().describe("Allergies, accessibility needs, occasion, etc."),
+      special_requests: z
+        .string()
+        .optional()
+        .describe("Allergies, accessibility needs, occasion, etc."),
     },
   },
   async (input) => {
@@ -257,7 +276,7 @@ server.registerTool(
     } catch (err) {
       return handleApiError(err, "Reservation failed");
     }
-  }
+  },
 );
 
 // ── BOOT ─────────────────────────────────────────────────────────────────

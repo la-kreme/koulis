@@ -34,16 +34,14 @@ const API_TOKEN = process.env.KOULIS_API_TOKEN;
 
 if (!API_TOKEN) {
   // stdout est réservé au protocole MCP — on logge sur stderr.
-  console.error(
-    "[koulis-mcp] WARNING: KOULIS_API_TOKEN is not set. API calls will fail with 401."
-  );
+  console.error("[koulis-mcp] WARNING: KOULIS_API_TOKEN is not set. API calls will fail with 401.");
 }
 
 export class KoulisApiError extends Error {
   constructor(
     public status: number,
     message: string,
-    public body?: unknown
+    public body?: unknown,
   ) {
     super(message);
     this.name = "KoulisApiError";
@@ -52,7 +50,7 @@ export class KoulisApiError extends Error {
 
 async function request<T>(
   path: string,
-  init: RequestInit & { query?: Record<string, string | number | undefined> } = {}
+  init: RequestInit & { query?: Record<string, string | number | undefined> } = {},
 ): Promise<T> {
   const { query, ...rest } = init;
 
@@ -90,13 +88,11 @@ async function request<T>(
   }
 
   if (!res.ok) {
+    const obj =
+      typeof parsed === "object" && parsed !== null ? (parsed as Record<string, unknown>) : null;
     const msg =
-      (typeof parsed === "object" && parsed !== null && "message" in parsed
-        ? String((parsed as { message: unknown }).message)
-        : undefined) ??
-      (typeof parsed === "object" && parsed !== null && "error" in parsed
-        ? JSON.stringify((parsed as { error: unknown }).error)
-        : undefined) ??
+      (obj && "message" in obj ? String(obj.message) : undefined) ??
+      (obj && "error" in obj ? JSON.stringify(obj.error) : undefined) ??
       `HTTP ${res.status}`;
     throw new KoulisApiError(res.status, msg, parsed);
   }
@@ -126,10 +122,10 @@ export const koulisApi = {
     window_hours?: number;
   }): Promise<ApiAvailabilitiesResponse> {
     const { restaurant_id, datetime, ...rest } = params;
-    return request<ApiAvailabilitiesResponse>(
-      `/v1/restaurants/${restaurant_id}/availabilities`,
-      { method: "GET", query: { ...rest, datetime: normalizeUtc(datetime) } }
-    );
+    return request<ApiAvailabilitiesResponse>(`/v1/restaurants/${restaurant_id}/availabilities`, {
+      method: "GET",
+      query: { ...rest, datetime: normalizeUtc(datetime) },
+    });
   },
 
   createHold(payload: {

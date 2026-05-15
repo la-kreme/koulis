@@ -95,13 +95,24 @@ server.registerTool("find_bookable_restaurant", {
         city: z.string().describe("City name, e.g. 'Paris'"),
         datetime: z.string().describe("Desired ISO datetime UTC, e.g. '2026-05-08T20:00:00Z'"),
         party_size: z.number().int().min(1).max(20),
-        cuisine: z.string().optional().describe("Optional cuisine filter, e.g. 'japonaise', 'française'"),
-        dietary: z.string().optional().describe("Optional dietary filter, e.g. 'vegan', 'sans gluten'"),
+        cuisine: z
+            .string()
+            .optional()
+            .describe("Optional cuisine filter, e.g. 'japonaise', 'française'"),
+        dietary: z
+            .string()
+            .optional()
+            .describe("Optional dietary filter, e.g. 'vegan', 'sans gluten'"),
     },
 }, async ({ city, datetime, party_size, cuisine, dietary }) => {
     try {
         const res = await koulisApi.searchRestaurants({
-            city, datetime, party_size, window_hours: 3, cuisine, dietary,
+            city,
+            datetime,
+            party_size,
+            window_hours: 3,
+            cuisine,
+            dietary,
         });
         return jsonContent({
             query: { city, datetime, party_size, cuisine, dietary },
@@ -131,7 +142,10 @@ server.registerTool("discover_slots", {
 }, async ({ restaurant_id, datetime, party_size }) => {
     try {
         const res = await koulisApi.getAvailabilities({
-            restaurant_id, datetime, party_size, window_hours: 2,
+            restaurant_id,
+            datetime,
+            party_size,
+            window_hours: 2,
         });
         return jsonContent({
             restaurant_id: res.restaurant_id,
@@ -162,14 +176,18 @@ server.registerTool("propose_reservation", {
         "NOT slot.local_time or slot.human_readable_fr. The API rejects non-UTC datetimes.",
     inputSchema: {
         restaurant_id: z.string().describe("UUID from find_bookable_restaurant"),
-        datetime: z.string().describe("Slot datetime as UTC ISO 8601 (slot.iso_utc from a previous tool result). " +
+        datetime: z
+            .string()
+            .describe("Slot datetime as UTC ISO 8601 (slot.iso_utc from a previous tool result). " +
             "Example: '2026-05-14T19:00:00.000Z'."),
         party_size: z.number().int().min(1).max(20),
     },
 }, async ({ restaurant_id, datetime, party_size }) => {
     try {
         const hold = await koulisApi.createHold({
-            restaurant_id, slot_at: datetime, party_size,
+            restaurant_id,
+            slot_at: datetime,
+            party_size,
         });
         return jsonContent({
             hold_id: hold.hold_id,
@@ -201,7 +219,10 @@ server.registerTool("confirm_reservation", {
         customer_name: z.string().min(1),
         customer_phone: z.string().min(6),
         customer_email: z.string().email(),
-        special_requests: z.string().optional().describe("Allergies, accessibility needs, occasion, etc."),
+        special_requests: z
+            .string()
+            .optional()
+            .describe("Allergies, accessibility needs, occasion, etc."),
     },
 }, async (input) => {
     try {
