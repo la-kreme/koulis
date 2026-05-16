@@ -35,10 +35,28 @@
   "engines": {
     "node": ">=22"
   },
-  "keywords": [],
-  "author": "",
-  "license": "ISC",
-  "description": "The open restaurant booking protocol",
+  "keywords": [
+    "mcp",
+    "model-context-protocol",
+    "restaurant",
+    "reservation",
+    "booking",
+    "ai-agent",
+    "claude",
+    "brunch",
+    "koulis"
+  ],
+  "author": "Koulis <hello@koulis.app> (https://koulis.ai)",
+  "license": "MIT",
+  "description": "MCP server for restaurant reservations — search, hold, and confirm bookings through AI agents",
+  "homepage": "https://koulis.ai",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/la-kreme/koulis.git"
+  },
+  "bugs": {
+    "url": "https://github.com/la-kreme/koulis/issues"
+  },
   "dependencies": {
     "@hono/node-server": "^2.0.2",
     "@modelcontextprotocol/sdk": "^1.29.0",
