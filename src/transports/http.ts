@@ -36,6 +36,37 @@ export function createHttpApp(apiClient: KoulisApiClient, rateLimiter: RateLimit
     }),
   );
 
+  // ── MCP Server Card (Smithery / registry discovery) ───────────────────
+  app.get("/.well-known/mcp/server-card.json", (c) =>
+    c.json({
+      serverInfo: {
+        name: "koulis",
+        version: pkg.version,
+      },
+      authentication: {
+        required: false,
+      },
+      tools: [
+        {
+          name: "find_bookable_restaurant",
+          description: "Search restaurants with available slots by city, date, and party size.",
+        },
+        {
+          name: "discover_slots",
+          description: "List all available time slots for a specific restaurant.",
+        },
+        {
+          name: "propose_reservation",
+          description: "Create a 5-minute hold on a slot (step 1 of 2-step booking).",
+        },
+        {
+          name: "confirm_reservation",
+          description: "Finalize the reservation with customer details (step 2, irreversible).",
+        },
+      ],
+    }),
+  );
+
   // ── CORS on /mcp ─────────────────────────────────────────────────────
   app.use(
     "/mcp",
