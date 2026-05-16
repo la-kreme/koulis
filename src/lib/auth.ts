@@ -25,12 +25,25 @@ export async function verifyBearerToken(authHeader: string | undefined): Promise
     throw new Error("Invalid authorization header format");
   }
 
-  const { payload } = await jwtVerify(match[1], JWKS, {
-    issuer: `https://${WORKOS_DOMAIN}`,
-    audience: MCP_RESOURCE_URL,
-  });
+  const token = match[1];
+  // Log token prefix for debugging (never log full token)
+  console.error(
+    `[koulis-mcp] Verifying token: ${token.substring(0, 20)}...`,
+    `issuer=https://${WORKOS_DOMAIN}`,
+    `audience=${MCP_RESOURCE_URL}`,
+  );
 
-  return payload as JWTPayload & AuthPayload;
+  try {
+    const { payload } = await jwtVerify(token, JWKS, {
+      issuer: `https://${WORKOS_DOMAIN}`,
+      audience: MCP_RESOURCE_URL,
+    });
+    console.error(`[koulis-mcp] JWT verified OK, sub=${payload.sub}`);
+    return payload as JWTPayload & AuthPayload;
+  } catch (err) {
+    console.error(`[koulis-mcp] JWT verification FAILED: ${(err as Error).message}`);
+    throw err;
+  }
 }
 
 export const PROTECTED_RESOURCE_METADATA = {
