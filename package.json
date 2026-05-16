@@ -18,7 +18,7 @@
     "typecheck": "tsc --noEmit",
     "test": "vitest run",
     "test:watch": "vitest",
-    "prepare": "lefthook install"
+    "prepare": "test \"$CI\" = 'true' || lefthook install"
   },
   "lint-staged": {
     "src/**/*.{ts,js}": [
@@ -32,6 +32,9 @@
   "files": [
     "build"
   ],
+  "engines": {
+    "node": ">=22"
+  },
   "keywords": [],
   "author": "",
   "license": "ISC",
