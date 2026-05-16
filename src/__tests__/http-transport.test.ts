@@ -1,6 +1,11 @@
 import { describe, it, expect, vi } from "vitest";
-import { createHttpApp } from "../transports/http.js";
+import { createHttpApp, startHttpServer } from "../transports/http.js";
+import { createRateLimiter } from "../lib/rate-limit.js";
 import { SEARCH_RESPONSE } from "./fixtures.js";
+
+vi.mock("@hono/node-server", () => ({
+  serve: vi.fn(),
+}));
 
 const mockApi = {
   searchRestaurants: vi.fn(),
@@ -9,7 +14,8 @@ const mockApi = {
   createReservation: vi.fn(),
 };
 
-const app = createHttpApp(mockApi);
+const rateLimiter = createRateLimiter({ windowMs: 60_000, maxRequests: 1000 });
+const app = createHttpApp(mockApi, rateLimiter);
 
 function mcpPost(body: unknown): Request {
   return new Request("http://localhost/mcp", {
@@ -118,5 +124,111 @@ describe("HTTP transport", () => {
     );
 
     expect(res.status).toBe(400);
+  });
+
+  it("returns 429 after rate limit exceeded", async () => {
+    const tightLimiter = createRateLimiter({ windowMs: 60_000, maxRequests: 2 });
+    const limitedApp = createHttpApp(mockApi, tightLimiter);
+
+    function mcpInit(ip: string): Request {
+      return new Request("http://localhost/mcp", {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          Accept: "application/json, text/event-stream",
+          "x-forwarded-for": ip,
+        },
+        body: JSON.stringify({
+          jsonrpc: "2.0",
+          id: 1,
+          method: "initialize",
+          params: {
+            protocolVersion: "2025-03-26",
+            capabilities: {},
+            clientInfo: { name: "test", version: "1.0" },
+          },
+        }),
+      });
+    }
+
+    const r1 = await limitedApp.fetch(mcpInit("10.0.0.1"));
+    expect(r1.status).toBe(200);
+    expect(r1.headers.get("X-RateLimit-Remaining")).toBe("1");
+
+    const r2 = await limitedApp.fetch(mcpInit("10.0.0.1"));
+    expect(r2.status).toBe(200);
+    expect(r2.headers.get("X-RateLimit-Remaining")).toBe("0");
+
+    const r3 = await limitedApp.fetch(mcpInit("10.0.0.1"));
+    expect(r3.status).toBe(429);
+    expect(r3.headers.get("X-RateLimit-Limit")).toBe("2");
+    expect(r3.headers.get("X-RateLimit-Remaining")).toBe("0");
+    const body = (await r3.json()) as Record<string, unknown>;
+    const error = body.error as Record<string, unknown>;
+    expect(error.code).toBe("rate_limit_exceeded");
+
+    // Different IP is not affected
+    const r4 = await limitedApp.fetch(mcpInit("10.0.0.2"));
+    expect(r4.status).toBe(200);
+
+    tightLimiter.dispose();
+  });
+
+  it("extracts IP from x-real-ip when x-forwarded-for is absent", async () => {
+    const tightLimiter = createRateLimiter({ windowMs: 60_000, maxRequests: 1 });
+    const limitedApp = createHttpApp(mockApi, tightLimiter);
+
+    const r1 = await limitedApp.fetch(
+      mcpPost({
+        jsonrpc: "2.0",
+        id: 1,
+        method: "initialize",
+        params: {
+          protocolVersion: "2025-03-26",
+          capabilities: {},
+          clientInfo: { name: "test", version: "1.0" },
+        },
+      }),
+    );
+    expect(r1.status).toBe(200);
+
+    // Second request from same "unknown" IP should be rate-limited
+    const r2 = await limitedApp.fetch(
+      new Request("http://localhost/mcp", {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          Accept: "application/json, text/event-stream",
+          "x-real-ip": "192.168.1.1",
+        },
+        body: JSON.stringify({
+          jsonrpc: "2.0",
+          id: 1,
+          method: "initialize",
+          params: {
+            protocolVersion: "2025-03-26",
+            capabilities: {},
+            clientInfo: { name: "test", version: "1.0" },
+          },
+        }),
+      }),
+    );
+    // x-real-ip=192.168.1.1 is a different key from "unknown", so still allowed
+    expect(r2.status).toBe(200);
+
+    tightLimiter.dispose();
+  });
+
+  it("startHttpServer boots with explicit options", () => {
+    startHttpServer({
+      port: 0,
+      apiClient: mockApi,
+      rateLimitWindowMs: 1000,
+      rateLimitMax: 10,
+    });
+  });
+
+  it("startHttpServer boots with env var defaults", () => {
+    startHttpServer({ port: 0 });
   });
 });

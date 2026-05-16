@@ -2,19 +2,41 @@
 import { Hono } from "hono";
 import { cors } from "hono/cors";
 import { serve } from "@hono/node-server";
+import type { Context, Next } from "hono";
 import { WebStandardStreamableHTTPServerTransport } from "@modelcontextprotocol/sdk/server/webStandardStreamableHttp.js";
 import { createKoulisMcpServer } from "../server.js";
 import { koulisApi, type KoulisApiClient } from "../lib/api-client.js";
+import { createRateLimiter, type RateLimiter } from "../lib/rate-limit.js";
 import pkg from "../../package.json" with { type: "json" };
 
 export interface HttpServerOptions {
   port: number;
   apiClient?: KoulisApiClient;
+  rateLimitWindowMs?: number;
+  rateLimitMax?: number;
 }
 
-export function createHttpApp(apiClient: KoulisApiClient): Hono {
+function getClientIp(c: Context): string {
+  const xff = c.req.header("x-forwarded-for");
+  if (xff) return xff.split(",")[0].trim();
+  const xri = c.req.header("x-real-ip");
+  if (xri) return xri.trim();
+  return "unknown";
+}
+
+export function createHttpApp(apiClient: KoulisApiClient, rateLimiter: RateLimiter): Hono {
   const app = new Hono();
 
+  // ── Healthcheck (NOT rate-limited) ────────────────────────────────────
+  app.get("/health", (c) =>
+    c.json({
+      status: "ok",
+      version: pkg.version,
+      uptime_seconds: Math.floor(process.uptime()),
+    }),
+  );
+
+  // ── CORS on /mcp ─────────────────────────────────────────────────────
   app.use(
     "/mcp",
     cors({
@@ -25,6 +47,26 @@ export function createHttpApp(apiClient: KoulisApiClient): Hono {
     }),
   );
 
+  // ── Rate limit on /mcp ────────────────────────────────────────────────
+  app.use("/mcp", async (c: Context, next: Next) => {
+    const ip = getClientIp(c);
+    const result = rateLimiter.check(ip);
+
+    c.header("X-RateLimit-Limit", String(result.limit));
+    c.header("X-RateLimit-Remaining", String(result.remaining));
+    c.header("X-RateLimit-Reset", String(result.resetSeconds));
+
+    if (!result.allowed) {
+      return c.json(
+        { error: { code: "rate_limit_exceeded", message: "Rate limit exceeded" } },
+        429,
+      );
+    }
+
+    await next();
+  });
+
+  // ── MCP endpoint ──────────────────────────────────────────────────────
   app.all("/mcp", async (c) => {
     const start = Date.now();
 
@@ -48,8 +90,14 @@ export function createHttpApp(apiClient: KoulisApiClient): Hono {
 
 export function startHttpServer(opts: HttpServerOptions) {
   const apiClient = opts.apiClient ?? koulisApi;
-  const app = createHttpApp(apiClient);
+  const windowMs = opts.rateLimitWindowMs ?? Number(process.env.RATE_LIMIT_WINDOW_MS ?? 60_000);
+  const maxRequests = opts.rateLimitMax ?? Number(process.env.RATE_LIMIT_MAX ?? 60);
+  const rateLimiter = createRateLimiter({ windowMs, maxRequests });
+  const app = createHttpApp(apiClient, rateLimiter);
 
   serve({ fetch: app.fetch, port: opts.port });
-  console.error(`[koulis-mcp] v${pkg.version} HTTP server listening on port ${opts.port}`);
+  console.error(
+    `[koulis-mcp] v${pkg.version} HTTP server listening on port ${opts.port} ` +
+      `(rate limit: ${maxRequests} req/${windowMs / 1000}s)`,
+  );
 }
