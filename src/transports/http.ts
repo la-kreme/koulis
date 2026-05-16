@@ -101,6 +101,22 @@ export function createHttpApp(apiClient: KoulisApiClient, rateLimiter: RateLimit
   app.all("/mcp", async (c) => {
     const start = Date.now();
 
+    // Some MCP clients (Smithery scanner, older SDKs) omit the Accept header
+    // required by the SDK. Inject it to avoid a 406 rejection.
+    let req = c.req.raw;
+    const accept = req.headers.get("accept");
+    if (!accept || !accept.includes("text/event-stream")) {
+      const headers = new Headers(req.headers);
+      headers.set("accept", "application/json, text/event-stream");
+      req = new Request(req.url, {
+        method: req.method,
+        headers,
+        body: req.body,
+        // @ts-expect-error duplex is required for streaming body but not in all TS defs
+        duplex: "half",
+      });
+    }
+
     const transport = new WebStandardStreamableHTTPServerTransport({
       sessionIdGenerator: undefined,
       enableJsonResponse: true,
@@ -108,7 +124,7 @@ export function createHttpApp(apiClient: KoulisApiClient, rateLimiter: RateLimit
     const server = createKoulisMcpServer({ apiClient });
     await server.connect(transport);
 
-    const response = await transport.handleRequest(c.req.raw);
+    const response = await transport.handleRequest(req);
 
     const elapsed = Date.now() - start;
     console.error(`[koulis-mcp] ${c.req.method} /mcp ${response.status} ${elapsed}ms`);
