@@ -168,6 +168,8 @@ async function request<T>(path: string, init: RequestOptions = {}): Promise<T> {
 }
 
 // ── Public API client ───────────────────────────────────────────────────
+export type KoulisApiClient = typeof koulisApi;
+
 export const koulisApi = {
   searchRestaurants(params: {
     city: string;
