@@ -6,6 +6,7 @@ The open restaurant reservations protocol for AI agents. A neutral aggregation l
 ![Version](https://img.shields.io/badge/version-0.2.0-blue.svg)
 ![MCP](https://img.shields.io/badge/MCP-2025--03--26-green.svg)
 ![Node 22+](https://img.shields.io/badge/node-22+-blue.svg)
+[![smithery badge](https://smithery.ai/badge/koulis/koulis)](https://smithery.ai/servers/koulis/koulis)
 
 ## What is Koulis MCP
 
