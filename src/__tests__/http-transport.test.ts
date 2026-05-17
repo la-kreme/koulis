@@ -237,7 +237,25 @@ describe("HTTP transport", () => {
   });
 
   // ── Auth tests ──────────────────────────────────────────────────────────
-  it("returns 401 without Bearer token", async () => {
+  it("returns 401 without Bearer token on tools/list", async () => {
+    const rejectAll = () => Promise.reject(new Error("no token"));
+    const strictApp = createHttpApp(mockApi, rateLimiter, rejectAll);
+
+    const res = await strictApp.fetch(
+      mcpPost({
+        jsonrpc: "2.0",
+        id: 1,
+        method: "tools/list",
+      }),
+    );
+
+    expect(res.status).toBe(401);
+    expect(res.headers.get("www-authenticate")).toContain("resource_metadata");
+    const body = (await res.json()) as Record<string, unknown>;
+    expect(body.error).toBe("unauthorized");
+  });
+
+  it("allows initialize without Bearer token (selective auth)", async () => {
     const rejectAll = () => Promise.reject(new Error("no token"));
     const strictApp = createHttpApp(mockApi, rateLimiter, rejectAll);
 
@@ -254,10 +272,8 @@ describe("HTTP transport", () => {
       }),
     );
 
-    expect(res.status).toBe(401);
-    expect(res.headers.get("www-authenticate")).toContain("resource_metadata");
-    const body = (await res.json()) as Record<string, unknown>;
-    expect(body.error).toBe("unauthorized");
+    // Should NOT be 401 — initialize passes without auth
+    expect(res.status).toBe(200);
   });
 
   it("returns 200 with valid Bearer token", async () => {
