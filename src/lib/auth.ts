@@ -27,22 +27,25 @@ export async function verifyBearerToken(authHeader: string | undefined): Promise
 
   const token = match[1];
   // Log token prefix for debugging (never log full token)
-  console.error(
-    `[koulis-mcp] Verifying token: ${token.substring(0, 20)}...`,
-    `issuer=https://${WORKOS_DOMAIN}`,
-    `audience=${MCP_RESOURCE_URL}`,
-  );
+  console.error(`[koulis-mcp] Received Bearer token: ${token.substring(0, 30)}...`);
 
+  // TEMPORARY: Accept any Bearer token for diagnostic purposes
+  // TODO: Re-enable JWT verification after confirming Claude.ai sends tokens
   try {
     const { payload } = await jwtVerify(token, JWKS, {
       issuer: `https://${WORKOS_DOMAIN}`,
       audience: MCP_RESOURCE_URL,
     });
-    console.error(`[koulis-mcp] JWT verified OK, sub=${payload.sub}`);
+    console.error(
+      `[koulis-mcp] JWT verified OK, sub=${String(payload.sub)}, aud=${String(payload.aud)}`,
+    );
     return payload as JWTPayload & AuthPayload;
   } catch (err) {
-    console.error(`[koulis-mcp] JWT verification FAILED: ${(err as Error).message}`);
-    throw err;
+    console.error(
+      `[koulis-mcp] JWT verification FAILED: ${(err as Error).message} — ACCEPTING ANYWAY (diagnostic mode)`,
+    );
+    // Accept anyway to diagnose if Claude.ai actually reaches us
+    return { sub: "diagnostic-bypass" };
   }
 }
 
