@@ -14,8 +14,12 @@ const mockApi = {
   createReservation: vi.fn(),
 };
 
+// Auth verifier that accepts any token for testing
+const passthrough: (h: string | undefined) => Promise<{ sub: string }> = () =>
+  Promise.resolve({ sub: "test-user-123" });
+
 const rateLimiter = createRateLimiter({ windowMs: 60_000, maxRequests: 1000 });
-const app = createHttpApp(mockApi, rateLimiter);
+const app = createHttpApp(mockApi, rateLimiter, passthrough);
 
 function mcpPost(body: unknown): Request {
   return new Request("http://localhost/mcp", {
@@ -128,7 +132,7 @@ describe("HTTP transport", () => {
 
   it("returns 429 after rate limit exceeded", async () => {
     const tightLimiter = createRateLimiter({ windowMs: 60_000, maxRequests: 2 });
-    const limitedApp = createHttpApp(mockApi, tightLimiter);
+    const limitedApp = createHttpApp(mockApi, tightLimiter, passthrough);
 
     function mcpInit(ip: string): Request {
       return new Request("http://localhost/mcp", {
@@ -176,7 +180,7 @@ describe("HTTP transport", () => {
 
   it("extracts IP from x-real-ip when x-forwarded-for is absent", async () => {
     const tightLimiter = createRateLimiter({ windowMs: 60_000, maxRequests: 1 });
-    const limitedApp = createHttpApp(mockApi, tightLimiter);
+    const limitedApp = createHttpApp(mockApi, tightLimiter, passthrough);
 
     const r1 = await limitedApp.fetch(
       mcpPost({
@@ -230,5 +234,111 @@ describe("HTTP transport", () => {
 
   it("startHttpServer boots with env var defaults", () => {
     startHttpServer({ port: 0 });
+  });
+
+  // ── Auth tests ──────────────────────────────────────────────────────────
+  it("returns 401 without Bearer token on tools/list", async () => {
+    const rejectAll = () => Promise.reject(new Error("no token"));
+    const strictApp = createHttpApp(mockApi, rateLimiter, rejectAll);
+
+    const res = await strictApp.fetch(
+      mcpPost({
+        jsonrpc: "2.0",
+        id: 1,
+        method: "tools/list",
+      }),
+    );
+
+    expect(res.status).toBe(401);
+    expect(res.headers.get("www-authenticate")).toContain("resource_metadata");
+    const body = (await res.json()) as Record<string, unknown>;
+    expect(body.error).toBe("unauthorized");
+  });
+
+  it("returns 401 for initialize without Bearer token (OAuth discovery trigger)", async () => {
+    const rejectAll = () => Promise.reject(new Error("no token"));
+    const strictApp = createHttpApp(mockApi, rateLimiter, rejectAll);
+
+    const res = await strictApp.fetch(
+      mcpPost({
+        jsonrpc: "2.0",
+        id: 1,
+        method: "initialize",
+        params: {
+          protocolVersion: "2025-03-26",
+          capabilities: {},
+          clientInfo: { name: "test", version: "1.0" },
+        },
+      }),
+    );
+
+    // All unauthenticated requests return 401 to trigger OAuth discovery (RFC 9728)
+    expect(res.status).toBe(401);
+    expect(res.headers.get("www-authenticate")).toContain("resource_metadata");
+  });
+
+  it("returns 200 with valid Bearer token", async () => {
+    // The default `app` uses passthrough verifier — should work
+    const res = await app.fetch(
+      mcpPost({
+        jsonrpc: "2.0",
+        id: 1,
+        method: "initialize",
+        params: {
+          protocolVersion: "2025-03-26",
+          capabilities: {},
+          clientInfo: { name: "test", version: "1.0" },
+        },
+      }),
+    );
+
+    expect(res.status).toBe(200);
+  });
+
+  it("GET /.well-known/oauth-protected-resource returns metadata", async () => {
+    const res = await app.fetch(
+      new Request("http://localhost/.well-known/oauth-protected-resource"),
+    );
+
+    expect(res.status).toBe(200);
+    const body = (await res.json()) as Record<string, unknown>;
+    expect(body.resource).toBeDefined();
+    expect(body.authorization_servers).toBeDefined();
+    expect(body.bearer_methods_supported).toEqual(["header"]);
+  });
+
+  it("GET /.well-known/oauth-authorization-server proxies to WorkOS", async () => {
+    const fakeMetadata = {
+      issuer: "https://example.authkit.app",
+      token_endpoint: "https://example.authkit.app/oauth2/token",
+    };
+    vi.stubGlobal(
+      "fetch",
+      vi.fn().mockResolvedValue({
+        json: () => Promise.resolve(fakeMetadata),
+      }),
+    );
+
+    const res = await app.fetch(
+      new Request("http://localhost/.well-known/oauth-authorization-server"),
+    );
+
+    expect(res.status).toBe(200);
+    const body = (await res.json()) as Record<string, unknown>;
+    expect(body.issuer).toBe("https://example.authkit.app");
+
+    vi.unstubAllGlobals();
+  });
+
+  it("GET /.well-known/mcp/server-card.json returns server card", async () => {
+    const res = await app.fetch(new Request("http://localhost/.well-known/mcp/server-card.json"));
+
+    expect(res.status).toBe(200);
+    const body = (await res.json()) as Record<string, unknown>;
+    const serverInfo = body.serverInfo as Record<string, unknown>;
+    expect(serverInfo.name).toBe("koulis");
+    const auth = body.authentication as Record<string, unknown>;
+    expect(auth.required).toBe(true);
+    expect(auth.schemes).toContain("oauth2");
   });
 });
