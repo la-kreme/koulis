@@ -7,6 +7,12 @@ import { WebStandardStreamableHTTPServerTransport } from "@modelcontextprotocol/
 import { createKoulisMcpServer } from "../server.js";
 import { koulisApi, type KoulisApiClient } from "../lib/api-client.js";
 import { createRateLimiter, type RateLimiter } from "../lib/rate-limit.js";
+import {
+  verifyBearerToken,
+  PROTECTED_RESOURCE_METADATA,
+  WWW_AUTHENTICATE_HEADER,
+  type AuthPayload,
+} from "../lib/auth.js";
 import pkg from "../../package.json" with { type: "json" };
 
 export interface HttpServerOptions {
@@ -16,6 +22,8 @@ export interface HttpServerOptions {
   rateLimitMax?: number;
 }
 
+export type AuthVerifier = (authHeader: string | undefined) => Promise<AuthPayload>;
+
 function getClientIp(c: Context): string {
   const xff = c.req.header("x-forwarded-for");
   if (xff) return xff.split(",")[0].trim();
@@ -24,10 +32,14 @@ function getClientIp(c: Context): string {
   return "unknown";
 }
 
-export function createHttpApp(apiClient: KoulisApiClient, rateLimiter: RateLimiter): Hono {
+export function createHttpApp(
+  apiClient: KoulisApiClient,
+  rateLimiter: RateLimiter,
+  authVerifier: AuthVerifier = verifyBearerToken,
+): Hono {
   const app = new Hono();
 
-  // ── Healthcheck (NOT rate-limited) ────────────────────────────────────
+  // ── Healthcheck (NOT authenticated, NOT rate-limited) ─────────────────
   app.get("/health", (c) =>
     c.json({
       status: "ok",
@@ -36,7 +48,17 @@ export function createHttpApp(apiClient: KoulisApiClient, rateLimiter: RateLimit
     }),
   );
 
-  // ── MCP Server Card (Smithery / registry discovery) ───────────────────
+  // ── OAuth Protected Resource Metadata (NOT authenticated) ─────────────
+  app.get("/.well-known/oauth-protected-resource", (c) => c.json(PROTECTED_RESOURCE_METADATA));
+
+  // ── OAuth Authorization Server Metadata proxy (NOT authenticated) ─────
+  app.get("/.well-known/oauth-authorization-server", async (c) => {
+    const domain = process.env.WORKOS_DOMAIN ?? "";
+    const res = await fetch(`https://${domain}/.well-known/oauth-authorization-server`);
+    return c.json(await res.json());
+  });
+
+  // ── MCP Server Card (registry discovery, NOT authenticated) ───────────
   app.get("/.well-known/mcp/server-card.json", (c) =>
     c.json({
       serverInfo: {
@@ -44,7 +66,8 @@ export function createHttpApp(apiClient: KoulisApiClient, rateLimiter: RateLimit
         version: pkg.version,
       },
       authentication: {
-        required: false,
+        required: true,
+        schemes: ["oauth2"],
       },
       tools: [
         {
@@ -77,6 +100,20 @@ export function createHttpApp(apiClient: KoulisApiClient, rateLimiter: RateLimit
       exposeHeaders: ["mcp-session-id", "mcp-protocol-version"],
     }),
   );
+
+  // ── Auth middleware on /mcp ──────────────────────────────────────────
+  // Every request without a valid Bearer token gets 401 + WWW-Authenticate.
+  // This triggers OAuth discovery on the client side (RFC 9728 flow).
+  app.use("/mcp", async (c: Context, next: Next) => {
+    try {
+      const payload = await authVerifier(c.req.header("authorization"));
+      c.set("userId", payload.sub);
+      await next();
+    } catch {
+      c.header("WWW-Authenticate", WWW_AUTHENTICATE_HEADER);
+      return c.json({ error: "unauthorized", message: "Bearer token required" }, 401);
+    }
+  });
 
   // ── Rate limit on /mcp ────────────────────────────────────────────────
   app.use("/mcp", async (c: Context, next: Next) => {

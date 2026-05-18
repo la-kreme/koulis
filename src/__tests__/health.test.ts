@@ -9,8 +9,10 @@ const mockApi = {
   createReservation: vi.fn(),
 };
 
+const passthrough: (h: string | undefined) => Promise<{ sub: string }> = () =>
+  Promise.resolve({ sub: "test-user" });
 const rateLimiter = createRateLimiter({ windowMs: 60_000, maxRequests: 5 });
-const app = createHttpApp(mockApi, rateLimiter);
+const app = createHttpApp(mockApi, rateLimiter, passthrough);
 
 afterAll(() => {
   rateLimiter.dispose();
