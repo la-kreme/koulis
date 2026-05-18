@@ -306,4 +306,39 @@ describe("HTTP transport", () => {
     expect(body.authorization_servers).toBeDefined();
     expect(body.bearer_methods_supported).toEqual(["header"]);
   });
+
+  it("GET /.well-known/oauth-authorization-server proxies to WorkOS", async () => {
+    const fakeMetadata = {
+      issuer: "https://example.authkit.app",
+      token_endpoint: "https://example.authkit.app/oauth2/token",
+    };
+    vi.stubGlobal(
+      "fetch",
+      vi.fn().mockResolvedValue({
+        json: () => Promise.resolve(fakeMetadata),
+      }),
+    );
+
+    const res = await app.fetch(
+      new Request("http://localhost/.well-known/oauth-authorization-server"),
+    );
+
+    expect(res.status).toBe(200);
+    const body = (await res.json()) as Record<string, unknown>;
+    expect(body.issuer).toBe("https://example.authkit.app");
+
+    vi.unstubAllGlobals();
+  });
+
+  it("GET /.well-known/mcp/server-card.json returns server card", async () => {
+    const res = await app.fetch(new Request("http://localhost/.well-known/mcp/server-card.json"));
+
+    expect(res.status).toBe(200);
+    const body = (await res.json()) as Record<string, unknown>;
+    const serverInfo = body.serverInfo as Record<string, unknown>;
+    expect(serverInfo.name).toBe("koulis");
+    const auth = body.authentication as Record<string, unknown>;
+    expect(auth.required).toBe(true);
+    expect(auth.schemes).toContain("oauth2");
+  });
 });
