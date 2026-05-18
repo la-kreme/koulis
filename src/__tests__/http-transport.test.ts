@@ -255,7 +255,7 @@ describe("HTTP transport", () => {
     expect(body.error).toBe("unauthorized");
   });
 
-  it("allows initialize without Bearer token (selective auth)", async () => {
+  it("returns 401 for initialize without Bearer token (OAuth discovery trigger)", async () => {
     const rejectAll = () => Promise.reject(new Error("no token"));
     const strictApp = createHttpApp(mockApi, rateLimiter, rejectAll);
 
@@ -272,8 +272,9 @@ describe("HTTP transport", () => {
       }),
     );
 
-    // Should NOT be 401 — initialize passes without auth
-    expect(res.status).toBe(200);
+    // All unauthenticated requests return 401 to trigger OAuth discovery (RFC 9728)
+    expect(res.status).toBe(401);
+    expect(res.headers.get("www-authenticate")).toContain("resource_metadata");
   });
 
   it("returns 200 with valid Bearer token", async () => {

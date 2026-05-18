@@ -11,7 +11,6 @@ import {
   verifyBearerToken,
   PROTECTED_RESOURCE_METADATA,
   WWW_AUTHENTICATE_HEADER,
-  isUnauthenticatedMethod,
   type AuthPayload,
 } from "../lib/auth.js";
 import pkg from "../../package.json" with { type: "json" };
@@ -102,31 +101,10 @@ export function createHttpApp(
     }),
   );
 
-  // ── Auth middleware on /mcp (selective) ────────────────────────────────
-  // initialize and notifications/* pass without auth (protocol handshake).
-  // All other methods (tools/list, tools/call) require Bearer token.
+  // ── Auth middleware on /mcp ──────────────────────────────────────────
+  // Every request without a valid Bearer token gets 401 + WWW-Authenticate.
+  // This triggers OAuth discovery on the client side (RFC 9728 flow).
   app.use("/mcp", async (c: Context, next: Next) => {
-    // GET (SSE) and DELETE (session close) — pass through for now
-    if (c.req.method !== "POST") {
-      await next();
-      return;
-    }
-
-    // Peek at body to determine JSON-RPC method
-    const cloned = c.req.raw.clone();
-    let body: unknown;
-    try {
-      body = await cloned.json();
-    } catch {
-      // Unparseable body — require auth (will likely fail downstream anyway)
-    }
-
-    if (isUnauthenticatedMethod(body)) {
-      await next();
-      return;
-    }
-
-    // Require auth for all other methods
     try {
       const payload = await authVerifier(c.req.header("authorization"));
       c.set("userId", payload.sub);
